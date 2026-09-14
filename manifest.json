@@ -1,0 +1,340 @@
+{
+  "id": "reminders",
+  "name": "Reminders",
+  "version": "1.0.0",
+  "description": "Recurring nags that stay on the board until someone acknowledges them: medication, plant watering, pet feeding and anything else that has to happen on a schedule.",
+  "author": "FiestaBoard Team",
+  "repository": "https://github.com/Fiestaboard/fiestaboard-plugin--reminders",
+  "documentation": "README.md",
+  "icon": "bell-ring",
+  "category": "utility",
+  "supports_triggers": true,
+  "min_refresh_seconds": 30,
+  "settings_schema": {
+    "type": "object",
+    "properties": {
+      "reminders": {
+        "type": "array",
+        "title": "Reminders",
+        "description": "Each recurring task (max 6). A reminder becomes due at its time and stays due until someone marks it done or the day rolls over.",
+        "maxItems": 6,
+        "default": [
+          {
+            "name": "Take vitamins",
+            "schedule": "daily",
+            "weekday": "Monday",
+            "interval_days": 2,
+            "anchor_date": "",
+            "time": "08:00",
+            "color": "red"
+          }
+        ],
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Name",
+              "description": "Short label, e.g. Take vitamins, Water the ferns, Feed the cat",
+              "maxLength": 12
+            },
+            "schedule": {
+              "type": "string",
+              "title": "Repeats",
+              "enum": [
+                "daily",
+                "weekdays",
+                "weekly",
+                "every_n_days"
+              ],
+              "enumNames": [
+                "Every day",
+                "Weekdays only (Mon-Fri)",
+                "Once a week",
+                "Every N days"
+              ],
+              "default": "daily"
+            },
+            "weekday": {
+              "type": "string",
+              "title": "Day of Week",
+              "description": "Which day the reminder lands on (weekly only; ignored for every other schedule).",
+              "enum": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday"
+              ],
+              "default": "Monday"
+            },
+            "interval_days": {
+              "type": "integer",
+              "title": "Every N Days",
+              "description": "Gap between repeats (every N days only; ignored for every other schedule).",
+              "default": 2,
+              "minimum": 1,
+              "maximum": 365
+            },
+            "anchor_date": {
+              "type": "string",
+              "title": "Starting From",
+              "description": "YYYY-MM-DD of a day the reminder happens, used to line up the N-day cycle (every N days only).",
+              "default": ""
+            },
+            "time": {
+              "type": "string",
+              "title": "Due At",
+              "description": "24-hour HH:MM, e.g. 08:00 or 18:30. The reminder turns due at this time.",
+              "default": "08:00"
+            },
+            "color": {
+              "type": "string",
+              "title": "Color",
+              "enum": [
+                "red",
+                "orange",
+                "yellow",
+                "green",
+                "blue",
+                "violet",
+                "white"
+              ],
+              "default": "red"
+            }
+          },
+          "required": [
+            "name",
+            "schedule",
+            "time"
+          ]
+        }
+      },
+      "timezone": {
+        "type": "string",
+        "title": "Timezone",
+        "description": "IANA timezone used to decide what day it is and when a reminder comes due.",
+        "default": "America/Los_Angeles",
+        "ui:widget": "timezone"
+      },
+      "secret": {
+        "type": "string",
+        "title": "HMAC Secret",
+        "description": "Optional shared secret. When set, every POST to /api/plugins/reminders/receive must carry an X-Webhook-Signature header (leave blank to accept unsigned requests).",
+        "default": "",
+        "ui:widget": "password"
+      },
+      "enable_triggers": {
+        "type": "boolean",
+        "title": "Take Over the Board When Due",
+        "description": "When on, the board switches to the reminder as it comes due — once per reminder per day. Turn this off to use the {{reminders.*}} variables on your own pages without ever interrupting the board.",
+        "default": true
+      },
+      "refresh_seconds": {
+        "type": "integer",
+        "title": "Refresh Interval (seconds)",
+        "description": "How often to recompute which reminders are due.",
+        "default": 60,
+        "minimum": 30,
+        "maximum": 3600
+      },
+      "enabled": {
+        "type": "boolean",
+        "title": "Enable Reminders",
+        "default": false
+      }
+    }
+  },
+  "env_vars": [
+    {
+      "name": "REMINDERS_ENABLED",
+      "required": false,
+      "description": "Enable the Reminders plugin",
+      "default": "false"
+    }
+  ],
+  "variables": {
+    "groups": {
+      "due": {
+        "label": "Due Now"
+      },
+      "next": {
+        "label": "Next Up"
+      },
+      "all": {
+        "label": "All Reminders"
+      }
+    },
+    "simple": {
+      "due_count": {
+        "description": "How many reminders are due right now and not yet acknowledged",
+        "type": "number",
+        "group": "due",
+        "max_length": 1,
+        "example": "2"
+      },
+      "due_names": {
+        "description": "Comma-separated names of the reminders that are due right now",
+        "type": "string",
+        "group": "due",
+        "max_length": 44,
+        "example": "Take vitamins, Water the ferns"
+      },
+      "message": {
+        "description": "One-line summary of the current state",
+        "type": "string",
+        "group": "due",
+        "max_length": 22,
+        "example": "2 REMINDERS DUE"
+      },
+      "next_name": {
+        "description": "Name of the soonest reminder (the first one due, or the next one coming up)",
+        "type": "string",
+        "group": "next",
+        "max_length": 12,
+        "example": "Take vitamins"
+      },
+      "next_time": {
+        "description": "Time of day the soonest reminder is due",
+        "type": "string",
+        "group": "next",
+        "max_length": 8,
+        "example": "8:00 AM"
+      },
+      "next_in": {
+        "description": "How long until the soonest reminder ('NOW' when it is already due)",
+        "type": "string",
+        "group": "next",
+        "max_length": 8,
+        "example": "2H 15M"
+      }
+    },
+    "arrays": {
+      "reminders": {
+        "label_field": "name",
+        "item_fields": [
+          "name",
+          "slug",
+          "time",
+          "is_due",
+          "is_done",
+          "color",
+          "next_date"
+        ]
+      }
+    }
+  },
+  "max_lengths": {
+    "reminders.*.name": 12,
+    "reminders.*.slug": 12,
+    "reminders.*.time": 8,
+    "reminders.*.is_due": 5,
+    "reminders.*.is_done": 5,
+    "reminders.*.color": 6,
+    "reminders.*.next_date": 6
+  },
+  "color_rules_schema": {
+    "due_count": {
+      "type": "threshold",
+      "description": "Color by whether anything is still outstanding",
+      "default_rules": [
+        {
+          "condition": ">",
+          "value": 0,
+          "color": "red"
+        },
+        {
+          "condition": "==",
+          "value": 0,
+          "color": "green"
+        }
+      ]
+    }
+  },
+  "fiestaboard_version": ">=8.0.0",
+  "teaser": "{63} VITAMINS DUE",
+  "previews": [
+    {
+      "device_type": "flagship",
+      "rows": [
+        "      REMINDERS",
+        "",
+        "{63} VITAMINS     8:00 AM",
+        "{67} WATER FERNS  9:30 AM",
+        "{65} FEED THE CAT 6:00 PM",
+        ""
+      ]
+    },
+    {
+      "device_type": "note",
+      "rows": [
+        "   REMINDERS",
+        "{63} VITAMINS",
+        "{67} WATER FERNS"
+      ]
+    }
+  ],
+  "demo": {
+    "flagship": {
+      "name": "Reminders Demo",
+      "template": [
+        "REMINDERS",
+        "{{reminders.message}}",
+        "{{reminders.reminders.0.name}} {{reminders.reminders.0.time}}",
+        "{{reminders.reminders.1.name}} {{reminders.reminders.1.time}}",
+        "{{reminders.reminders.2.name}} {{reminders.reminders.2.time}}",
+        "NEXT {{reminders.next_name}} {{reminders.next_in}}"
+      ],
+      "line_metadata": [
+        {
+          "alignment": "center",
+          "wrap": false
+        },
+        {
+          "alignment": "center",
+          "wrap": false
+        },
+        {
+          "alignment": "left",
+          "wrap": false
+        },
+        {
+          "alignment": "left",
+          "wrap": false
+        },
+        {
+          "alignment": "left",
+          "wrap": false
+        },
+        {
+          "alignment": "left",
+          "wrap": false
+        }
+      ]
+    },
+    "note": {
+      "name": "Reminders (Note)",
+      "template": [
+        "REMINDERS",
+        "{{reminders.message}}",
+        "{{reminders.due_names}}"
+      ],
+      "line_metadata": [
+        {
+          "alignment": "left",
+          "wrap": false
+        },
+        {
+          "alignment": "left",
+          "wrap": false
+        },
+        {
+          "alignment": "left",
+          "wrap": true
+        }
+      ]
+    }
+  }
+}
