@@ -8,6 +8,8 @@ Recurring nags that stay on the board until someone acknowledges them — medica
 
 You describe up to six reminders in the plugin settings: a name, when it repeats, and what time of day it comes due. At that time the reminder turns **due** and stays due — on the board, counted in `{{reminders.due_count}}` — until either someone marks it done or the local day rolls over.
 
+![Reminders Display](./docs/board-display.png)
+
 Acknowledgements come in over HTTP:
 
 ```bash

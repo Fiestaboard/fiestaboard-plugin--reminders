@@ -276,6 +276,14 @@
       ]
     }
   ],
+  "screenshots": [
+    {
+      "src": "docs/board-display.png",
+      "alt": "Reminders displayed on a Vestaboard",
+      "caption": "Recurring nags that stay on the board until someone acknowledges them: medication, plant watering, pet feeding and anything else that has to happen on a schedule.",
+      "primary": true
+    }
+  ],
   "demo": {
     "flagship": {
       "name": "Reminders Demo",
