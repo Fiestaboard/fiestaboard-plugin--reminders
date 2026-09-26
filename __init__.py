@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 
+from src.devices import MAX_NOTES_PER_AXIS, NOTE_ROWS
 from src.plugins.base import PluginBase, PluginResult, TriggerResult
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,15 @@ COLORS = ("red", "orange", "yellow", "green", "blue", "violet", "white")
 
 DEFAULT_TIMEZONE = "America/Los_Angeles"
 DEFAULT_COLOR = "red"
-MAX_REMINDERS = 6
+# One config must serve every board the user owns (there is no per-board
+# setting), so the cap has to cover the largest one: an 8-tall note array is
+# MAX_NOTES_PER_AXIS * NOTE_ROWS rows, minus one for the "REMINDERS" header.
+# A fixed 6 left a 24-row panel showing at most 6 items no matter its height.
+MAX_REMINDERS = MAX_NOTES_PER_AXIS * NOTE_ROWS - 1
 MAX_NAME_TILES = 12
+TIME_FIELD_TILES = 8  # "12:00 AM" style; matches manifest max_lengths.reminders.*.time
+LINE_OVERHEAD_TILES = 2  # colour tile + one separating space
+MIN_NAME_TILES_FOR_TIME = 6  # below this, the time field would leave an unreadable sliver of name
 
 _SIGNATURE_HEADER = "x-webhook-signature"
 _TRIGGER_PRIORITY = 5
@@ -116,13 +124,18 @@ def _next_occurrence(reminder: Dict[str, Any], start: date) -> date:
     raise ValueError(f"No occurrence found for reminder '{reminder['name']}'")
 
 
-def _build_message(due_names: List[str]) -> str:
-    """One-line summary that always fits in 22 tiles."""
+def _build_message(due_names: List[str], cols: int) -> str:
+    """One-line summary that always fits within ``cols`` tiles.
+
+    ``message`` is a template variable a user can place on any board, so its
+    length limit has to track the board it is actually rendered for rather
+    than assuming a 22-tile Flagship.
+    """
     if not due_names:
         return "ALL DONE"
     if len(due_names) == 1:
         single = f"{due_names[0].upper()} DUE"
-        return single if len(single) <= 22 else "1 REMINDER DUE"
+        return single if len(single) <= cols else "1 REMINDER DUE"
     return f"{len(due_names)} REMINDERS DUE"
 
 
@@ -296,7 +309,7 @@ class RemindersPlugin(PluginBase):
         data = {
             "due_count": str(len(due_names)),
             "due_names": ", ".join(due_names)[:44],
-            "message": _build_message(due_names),
+            "message": _build_message(due_names, self._cols()),
             "next_name": soonest["name"][:MAX_NAME_TILES],
             "next_time": soonest["time"],
             "next_in": _format_in((soonest["_dt"] - now).total_seconds()),
@@ -363,7 +376,12 @@ class RemindersPlugin(PluginBase):
             return PluginResult(available=False, error=str(e))
 
     def get_formatted_display(self) -> Optional[List[str]]:
-        result = self.get_data()
+        # Read self.board directly via fetch_data(), rather than going
+        # through get_data(): get_data() defaults its own board argument to
+        # None and rebinds self.board for the duration of the call, which
+        # would silently discard whatever board the caller already bound
+        # (e.g. via _bound_board) and render for a default Flagship instead.
+        result = self.fetch_data()
         if not result.available:
             return None
         return result.formatted_lines
@@ -413,10 +431,15 @@ class RemindersPlugin(PluginBase):
     def _reminder_line(self, item: Dict[str, Any], cols: int) -> str:
         tile = f"{{{item['color']}}}"
         name = item["name"].upper()
-        if cols >= 22:
-            # tile + space + 12-char name + right-aligned 8-char time = 22 tiles
-            return f"{tile} {name[:MAX_NAME_TILES]:<{MAX_NAME_TILES}}{item['time']:>8}"
-        return f"{tile} {name[:cols - 2]}"
+        # Name width is derived from the board, not a fixed 12 tiles: a
+        # 22-col Flagship and a 120-col note array both used to get the same
+        # 22-tile layout, leaving up to 98 columns blank on the wider one.
+        name_width = cols - LINE_OVERHEAD_TILES - TIME_FIELD_TILES
+        if name_width < MIN_NAME_TILES_FOR_TIME:
+            # Not enough room for a time field next to a useful name (e.g. a
+            # 15-tile Note): give every remaining tile to the name instead.
+            return f"{tile} {name[:cols - LINE_OVERHEAD_TILES]}"
+        return f"{tile} {name[:name_width]:<{name_width}}{item['time']:>{TIME_FIELD_TILES}}"
 
     def _format_display(self, data: Dict[str, Any]) -> List[str]:
         rows = self._rows()
