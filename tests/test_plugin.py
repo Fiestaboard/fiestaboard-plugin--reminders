@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 import pytest
 import pytz
 
-from plugins.reminders import RemindersPlugin
+from plugins.reminders import MAX_REMINDERS, RemindersPlugin
+from src.devices import BoardContext
 
 
 MANIFEST = json.load(
@@ -289,7 +290,8 @@ def test_validate_config_rejects_empty_too_many_and_duplicate_reminders():
     plugin = RemindersPlugin(MANIFEST)
     assert "At least one reminder is required" in plugin.validate_config({"reminders": []})
     assert any(
-        "At most 6" in e for e in plugin.validate_config({"reminders": [VITAMINS] * 7})
+        f"At most {MAX_REMINDERS}" in e
+        for e in plugin.validate_config({"reminders": [VITAMINS] * (MAX_REMINDERS + 1)})
     )
     assert any(
         "unique" in e
@@ -354,3 +356,79 @@ def test_formatted_display_says_all_done():
 
 def test_formatted_display_returns_none_when_unavailable():
     assert make_plugin([], now=_utc(2026, 9, 16, 12)).get_formatted_display() is None
+
+
+# ----------------------------------------------------------------------
+# Board geometry
+# ----------------------------------------------------------------------
+
+
+def test_reminder_count_is_not_capped_at_six_on_a_tall_board():
+    """A cap independent of the board leaves a tall panel mostly blank.
+
+    MAX_REMINDERS used to be a hardcoded 6, so no matter how tall the board,
+    at most 6 items would ever show. It is now derived from the largest
+    note-array (24 rows), so a tall board can show far more than 6.
+    """
+    reminders = [
+        {"name": f"R{i}", "schedule": "daily", "time": "00:00", "color": "red"}
+        for i in range(1, MAX_REMINDERS + 1)
+    ]
+    plugin = make_plugin(reminders, now=_utc(2026, 9, 16, 12))
+    board = BoardContext(device_type="note_array", rows=24, cols=15)  # 1 wide x 8 tall
+    lines = plugin.get_data(board).formatted_lines
+    assert len(lines) == 24
+    shown = sum(1 for line in lines if line.strip())
+    # Header + every configured reminder: strictly more than the old cap of
+    # 6 (header + 6 = 7) would ever have allowed.
+    assert shown == 1 + MAX_REMINDERS
+    assert shown > 7
+
+
+def test_reminder_line_widens_with_the_board():
+    """The name field must scale with cols, not stay fixed at 12 tiles."""
+    long_name = {
+        "name": "Empty the dishwasher completely",
+        "schedule": "daily",
+        "time": "08:00",
+        "color": "red",
+    }
+    plugin = make_plugin([long_name], now=_utc(2026, 9, 16, 12))
+    board = BoardContext(device_type="note_array", rows=12, cols=30)  # 2 wide x 4 tall
+    lines = plugin.get_data(board).formatted_lines
+    assert lines[1] == "{red} EMPTY THE DISHWASHER 8:00 AM"
+
+
+def test_reminder_line_drops_the_time_field_on_a_narrow_board():
+    """A Note is too narrow for both a useful name and a time field."""
+    plugin = make_plugin([VITAMINS], now=_utc(2026, 9, 16, 12))
+    board = BoardContext(device_type="note", rows=3, cols=15)
+    lines = plugin.get_data(board).formatted_lines
+    assert lines[1] == "{red} TAKE VITAMINS"
+
+
+def test_message_variable_fits_a_note_not_just_a_flagship():
+    """`message` must respect the board it's rendered for, not a fixed 22."""
+    plugin = make_plugin([VITAMINS], now=_utc(2026, 9, 16, 12))
+    note = BoardContext(device_type="note", rows=3, cols=15)
+    result = plugin.get_data(note)
+    # "TAKE VITAMINS DUE" is 17 chars -- fits a 22-tile Flagship but not a
+    # 15-tile Note, so the short fallback form must be used instead.
+    assert result.data["message"] == "1 REMINDER DUE"
+    assert len(result.data["message"]) <= 15
+
+
+def test_get_formatted_display_honours_the_currently_bound_board():
+    """get_formatted_display() must render for self.board, not a default.
+
+    It must not go through get_data() (which defaults its own board
+    argument to None and would silently discard whatever board the caller
+    already bound), or every call would render a Flagship-sized frame.
+    """
+    plugin = make_plugin([VITAMINS], now=_utc(2026, 9, 16, 12))
+    note = BoardContext(device_type="note", rows=3, cols=15)
+    with plugin._bound_board(note):
+        lines = plugin.get_formatted_display()
+    assert len(lines) == 3
+    for line in lines:
+        assert len(line.replace("{red}", ".")) <= 15

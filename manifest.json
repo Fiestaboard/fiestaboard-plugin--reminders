@@ -1,7 +1,7 @@
 {
   "id": "reminders",
   "name": "Reminders",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Recurring nags that stay on the board until someone acknowledges them: medication, plant watering, pet feeding and anything else that has to happen on a schedule.",
   "author": "FiestaBoard Team",
   "repository": "https://github.com/Fiestaboard/fiestaboard-plugin--reminders",
@@ -16,8 +16,8 @@
       "reminders": {
         "type": "array",
         "title": "Reminders",
-        "description": "Each recurring task (max 6). A reminder becomes due at its time and stays due until someone marks it done or the day rolls over.",
-        "maxItems": 6,
+        "description": "Each recurring task (max 23, so the list can fill the tallest note-array panel; a smaller board just shows as many as fit). A reminder becomes due at its time and stays due until someone marks it done or the day rolls over.",
+        "maxItems": 23,
         "default": [
           {
             "name": "Take vitamins",
@@ -273,6 +273,18 @@
         "   REMINDERS",
         "{63} VITAMINS",
         "{67} WATER FERNS"
+      ]
+    },
+    {
+      "label": "Note Array (2x2)",
+      "device_type": "note_array",
+      "notes_wide": 2,
+      "notes_tall": 2,
+      "rows": [
+        "          REMINDERS",
+        "{63} TAKE VITAMINS        8:00 AM",
+        "{67} WATER THE FERNS      9:30 AM",
+        "{65} FEED THE CAT         6:00 PM"
       ]
     }
   ],
